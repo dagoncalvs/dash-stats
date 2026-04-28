@@ -23,10 +23,10 @@ function parseNumber(str) {
 }
 
 (async () => {
-  const email    = process.env.AIWEBPUSH_EMAIL;
+  const email = process.env.AIWEBPUSH_EMAIL;
   const password = process.env.AIWEBPUSH_PASSWORD;
-  const site     = process.env.AIWEBPUSH_SITE;
-  const target   = getTargetDate();
+  const site = process.env.AIWEBPUSH_SITE;
+  const target = getTargetDate();
 
   if (!email || !password) {
     process.stdout.write(JSON.stringify({
@@ -62,14 +62,20 @@ function parseNumber(str) {
     // ── 1. Login ────────────────────────────────────────────────────────────
     process.stderr.write('[1/5] Abrindo página de login...\n');
     await page.goto('https://app.aiwebpush.com/login', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
 
+    // Angular precisa de tempo para renderizar os componentes
+    await page.waitForTimeout(3000);
+
     process.stderr.write('[2/5] Preenchendo credenciais...\n');
-    await page.fill('input[type="email"], input[name="email"]', email);
-    await page.fill('input[type="password"], input[name="password"]', password);
-    await page.click('button[type="submit"]');
+    await page.fill('input[type="email"], input[name="email"], input[placeholder*="mail"]', email);
+    await page.fill('input[type="password"], input[name="password"], input[placeholder*="senha"]', password);
+
+    // Botão "Acessar" do Angular Material — não tem type="submit"
+    process.stderr.write('[2/5] Clicando em Acessar...\n');
+    await page.click('button[color="primary"], button:has-text("Acessar")');
 
     await page.waitForURL(/app\.aiwebpush\.com\/(?!login)/, { timeout: 30000 });
     process.stderr.write('[3/5] Login OK. Navegando para campanhas...\n');
@@ -139,11 +145,11 @@ function parseNumber(str) {
           for (let i = 0; i < allText.length; i++) {
             const val = allText[i];
             const label = (allText[i + 1] || '').toLowerCase();
-            if (label.includes('enviado'))                              enviados   = val;
+            if (label.includes('enviado')) enviados = val;
             else if (label.includes('impressão') || label.includes('impressoe')) impressoes = val;
-            else if (label === 'clicks' || label === 'cliques')         clicks     = val;
-            else if (label === 'ctr')                                   ctr        = val;
-            else if (label === 'its')                                   its        = val;
+            else if (label === 'clicks' || label === 'cliques') clicks = val;
+            else if (label === 'ctr') ctr = val;
+            else if (label === 'its') its = val;
           }
 
           results.push({ isoDate, name, status, enviados, impressoes, clicks, ctr, its });
@@ -155,14 +161,14 @@ function parseNumber(str) {
       for (const item of items) {
         if (item.isoDate === target) {
           campaigns.push({
-            data:       item.isoDate,
-            campanha:   item.name,
-            status:     item.status,
-            enviados:   parseNumber(item.enviados),
+            data: item.isoDate,
+            campanha: item.name,
+            status: item.status,
+            enviados: parseNumber(item.enviados),
             impressoes: parseNumber(item.impressoes),
-            clicks:     parseNumber(item.clicks),
-            ctr:        parseNumber(item.ctr),
-            its:        parseNumber(item.its),
+            clicks: parseNumber(item.clicks),
+            ctr: parseNumber(item.ctr),
+            its: parseNumber(item.its),
           });
         } else if (item.isoDate < target) {
           foundOlderDate = true;
@@ -192,18 +198,18 @@ function parseNumber(str) {
     // ── 5. Saída ──────────────────────────────────────────────────────────────
     process.stderr.write(`[5/5] Concluído. ${campaigns.length} campanha(s) encontrada(s).\n`);
     process.stdout.write(JSON.stringify({
-      success:    true,
+      success: true,
       targetDate: target,
-      site:       site || 'todos',
-      count:      campaigns.length,
+      site: site || 'todos',
+      count: campaigns.length,
       campaigns,
     }, null, 2));
 
   } catch (err) {
     process.stdout.write(JSON.stringify({
       success: false,
-      error:   err.message,
-      stack:   err.stack,
+      error: err.message,
+      stack: err.stack,
     }));
   } finally {
     if (browser) await browser.close();
