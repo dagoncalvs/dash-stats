@@ -15,7 +15,7 @@ http.createServer((req, res) => {
 
   execFile('node', ['scraper.js'], {
     env: { ...process.env },
-    timeout: 120000
+    timeout: 180000
   }, (err, stdout, stderr) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     if (err) {
