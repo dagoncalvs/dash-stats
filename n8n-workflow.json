@@ -1,0 +1,146 @@
+{
+  "name": "AIWebPush → Google Sheets (métricas diárias)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "node-schedule",
+      "name": "Todo dia às 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /opt/aiwebpush-bot && AIWEBPUSH_EMAIL={{ $env.AIWEBPUSH_EMAIL }} AIWEBPUSH_PASSWORD={{ $env.AIWEBPUSH_PASSWORD }} AIWEBPUSH_SITE={{ $env.AIWEBPUSH_SITE }} node scraper.js"
+      },
+      "id": "node-scraper",
+      "name": "Executar Scraper",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "notes": "Roda o script Playwright no servidor. Ajuste o caminho /opt/aiwebpush-bot conforme onde você instalou."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseia o JSON retornado pelo scraper\nconst raw = $input.first().json;\nconst stdout = raw.stdout || '';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(stdout);\n} catch (e) {\n  throw new Error('Scraper retornou saída inválida: ' + stdout.substring(0, 300));\n}\n\nif (!parsed.success) {\n  throw new Error('Scraper falhou: ' + parsed.error);\n}\n\nif (parsed.count === 0) {\n  // Nenhuma campanha no dia anterior — retorna item especial para log\n  return [{\n    json: {\n      _nenhuma: true,\n      targetDate: parsed.targetDate,\n      mensagem: `Nenhuma campanha encontrada para ${parsed.targetDate}`,\n    }\n  }];\n}\n\n// Retorna um item por campanha\nreturn parsed.campaigns.map(c => ({ json: c }));\n"
+      },
+      "id": "node-parse",
+      "name": "Parsear JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json._nenhuma }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-check",
+      "name": "Tem campanhas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SEU_SPREADSHEET_ID_AQUI"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Campanhas"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Data":       "={{ $json.data }}",
+            "Campanha":   "={{ $json.campanha }}",
+            "Status":     "={{ $json.status }}",
+            "Enviados":   "={{ $json.enviados }}",
+            "Impressões": "={{ $json.impressoes }}",
+            "Clicks":     "={{ $json.clicks }}",
+            "CTR (%)":    "={{ $json.ctr }}",
+            "ITS (%)":    "={{ $json.its }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-sheets",
+      "name": "Salvar no Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 180],
+      "notes": "Substitua SEU_SPREADSHEET_ID_AQUI pelo ID da sua planilha (URL: docs.google.com/spreadsheets/d/[ID]/edit)"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SEU_SPREADSHEET_ID_AQUI"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Data":     "={{ $json.targetDate }}",
+            "Mensagem": "={{ $json.mensagem }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-log",
+      "name": "Log: sem campanhas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 420]
+    }
+  ],
+  "connections": {
+    "Todo dia às 8h": {
+      "main": [[{ "node": "Executar Scraper", "type": "main", "index": 0 }]]
+    },
+    "Executar Scraper": {
+      "main": [[{ "node": "Parsear JSON", "type": "main", "index": 0 }]]
+    },
+    "Parsear JSON": {
+      "main": [[{ "node": "Tem campanhas?", "type": "main", "index": 0 }]]
+    },
+    "Tem campanhas?": {
+      "main": [
+        [{ "node": "Log: sem campanhas", "type": "main", "index": 0 }],
+        [{ "node": "Salvar no Google Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1
+}

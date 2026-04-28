@@ -1,0 +1,13 @@
+{
+  "name": "aiwebpush-scraper",
+  "version": "1.0.0",
+  "description": "Scraper de métricas de campanhas AIWebPush para Google Sheets via n8n",
+  "main": "scraper.js",
+  "scripts": {
+    "start": "node scraper.js",
+    "install-browser": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.43.0"
+  }
+}
