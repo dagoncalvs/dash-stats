@@ -18,15 +18,15 @@ function getTargetDate() {
 }
 
 function parseNumber(str) {
-  if (!str || str.trim() === '-') return 0;
+  if (!str || str.trim() === '-' || str.trim() === '0') return 0;
   return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
 }
 
 (async () => {
-  const email = process.env.AIWEBPUSH_EMAIL;
+  const email    = process.env.AIWEBPUSH_EMAIL;
   const password = process.env.AIWEBPUSH_PASSWORD;
-  const site = process.env.AIWEBPUSH_SITE;
-  const target = getTargetDate();
+  const site     = process.env.AIWEBPUSH_SITE;
+  const target   = getTargetDate();
 
   if (!email || !password) {
     process.stdout.write(JSON.stringify({
@@ -53,7 +53,6 @@ function parseNumber(str) {
       timezoneId: 'America/Sao_Paulo',
     });
 
-    // Timeout global de navegação: 60s
     context.setDefaultNavigationTimeout(60000);
     context.setDefaultTimeout(60000);
 
@@ -89,7 +88,7 @@ function parseNumber(str) {
     // ── 3. Seleciona o site ───────────────────────────────────────────────────
     if (site) {
       const siteSelector = await page.$(
-        'select, [role="combobox"], [class*="site-select"], [class*="siteSelect"]'
+        'select, [role="combobox"], [class*="site-select"], [class*="siteSelect"], mat-select'
       );
       if (siteSelector) {
         await siteSelector.click();
@@ -111,46 +110,57 @@ function parseNumber(str) {
     let foundOlderDate = false;
 
     while (!foundOlderDate) {
-      await page.waitForSelector('[class*="campaign"], [class*="Campaign"]', {
-        timeout: 30000,
-      });
+      // Aguarda as mat-rows da tabela Angular carregarem
+      await page.waitForSelector('mat-row', { timeout: 30000 });
       await page.waitForTimeout(1500);
 
       const items = await page.evaluate((targetDate) => {
         const results = [];
-        const cards = document.querySelectorAll(
-          '[class*="campaign-item"], [class*="campaignItem"], [class*="campaign-card"], [class*="campaignCard"], .campaign-row, [class*="CampaignItem"]'
-        );
+        const seen = new Set();
 
-        cards.forEach(card => {
-          const text = card.innerText || '';
+        // Cada campanha é uma mat-row na tabela Angular Material
+        const rows = document.querySelectorAll('mat-row');
+
+        rows.forEach(row => {
+          const text = row.innerText || '';
+
+          // ── Data ────────────────────────────────────────────────────
           const dateMatch = text.match(/Envio[:\s]+(\d{2}\/\d{2}\/\d{4})/);
-          const rawDate = dateMatch ? dateMatch[1] : '';
-          const [day, month, year] = rawDate ? rawDate.split('/') : ['', '', ''];
-          const isoDate = rawDate ? `${year}-${month}-${day}` : '';
-          if (!isoDate) return;
+          if (!dateMatch) return;
+          const [day, month, year] = dateMatch[1].split('/');
+          const isoDate = `${year}-${month}-${day}`;
 
-          const titleEl = card.querySelector('a, h3, h4, [class*="title"], [class*="name"]');
-          const name = titleEl ? titleEl.textContent.trim() : 'Sem nome';
+          // ── Nome (primeiro link ou célula de nome) ──────────────────
+          const nameEl = row.querySelector('mat-cell a, .campaign-name, mat-cell h3, mat-cell h4');
+          const name = nameEl ? nameEl.textContent.trim() : text.split('\n')[0].trim();
 
-          const statusEl = card.querySelector('[class*="status"], [class*="badge"], [class*="chip"]');
+          // Deduplicação por nome + data
+          const key = `${isoDate}:${name}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+
+          // ── Status ──────────────────────────────────────────────────
+          const statusEl = row.querySelector('[class*="badge"], [class*="chip"], [class*="status"]');
           const status = statusEl ? statusEl.textContent.trim() : '';
 
-          const allText = Array.from(card.querySelectorAll('*'))
-            .filter(el => el.children.length === 0)
-            .map(el => el.textContent.trim())
-            .filter(t => t.length > 0);
+          // ── Métricas via .metric > .metric-value + .metric-label ────
+          // Estrutura confirmada pelo HTML real da plataforma:
+          // <div class="metric">
+          //   <span class="metric-value">2345</span>
+          //   <span class="metric-label">Enviados</span>
+          // </div>
+          let enviados = '0', impressoes = '0', clicks = '0', ctr = '0', its = '0';
 
-          let enviados = '', impressoes = '', clicks = '', ctr = '', its = '';
-          for (let i = 0; i < allText.length; i++) {
-            const val = allText[i];
-            const label = (allText[i + 1] || '').toLowerCase();
-            if (label.includes('enviado')) enviados = val;
-            else if (label.includes('impressão') || label.includes('impressoe')) impressoes = val;
-            else if (label === 'clicks' || label === 'cliques') clicks = val;
-            else if (label === 'ctr') ctr = val;
-            else if (label === 'its') its = val;
-          }
+          row.querySelectorAll('.metric').forEach(metric => {
+            const value = metric.querySelector('.metric-value')?.textContent.trim() || '0';
+            const label = (metric.querySelector('.metric-label')?.textContent.trim() || '').toLowerCase();
+
+            if (label.includes('enviado'))      enviados   = value;
+            else if (label.includes('impres'))  impressoes = value;
+            else if (label === 'clicks')        clicks     = value;
+            else if (label === 'ctr')           ctr        = value;
+            else if (label === 'its')           its        = value;
+          });
 
           results.push({ isoDate, name, status, enviados, impressoes, clicks, ctr, its });
         });
@@ -161,14 +171,14 @@ function parseNumber(str) {
       for (const item of items) {
         if (item.isoDate === target) {
           campaigns.push({
-            data: item.isoDate,
-            campanha: item.name,
-            status: item.status,
-            enviados: parseNumber(item.enviados),
+            data:       item.isoDate,
+            campanha:   item.name,
+            status:     item.status,
+            enviados:   parseNumber(item.enviados),
             impressoes: parseNumber(item.impressoes),
-            clicks: parseNumber(item.clicks),
-            ctr: parseNumber(item.ctr),
-            its: parseNumber(item.its),
+            clicks:     parseNumber(item.clicks),
+            ctr:        parseNumber(item.ctr),
+            its:        parseNumber(item.its),
           });
         } else if (item.isoDate < target) {
           foundOlderDate = true;
@@ -198,18 +208,18 @@ function parseNumber(str) {
     // ── 5. Saída ──────────────────────────────────────────────────────────────
     process.stderr.write(`[5/5] Concluído. ${campaigns.length} campanha(s) encontrada(s).\n`);
     process.stdout.write(JSON.stringify({
-      success: true,
+      success:    true,
       targetDate: target,
-      site: site || 'todos',
-      count: campaigns.length,
+      site:       site || 'todos',
+      count:      campaigns.length,
       campaigns,
     }, null, 2));
 
   } catch (err) {
     process.stdout.write(JSON.stringify({
       success: false,
-      error: err.message,
-      stack: err.stack,
+      error:   err.message,
+      stack:   err.stack,
     }));
   } finally {
     if (browser) await browser.close();
